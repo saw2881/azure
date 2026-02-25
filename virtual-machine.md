@@ -179,26 +179,168 @@ Strategies to ensure VM uptime and resilience.
 - **Use case:** Dev/test, non-critical workloads
 
 ### Availability Zones
-- Physically separate data centers within a region
-- Each zone has independent power, cooling, networking
-- Protects against data center failures
-- SLA: 99.99%
-- **Use case:** Production workloads requiring high availability
+Physically separate data centers within an Azure region, each with independent power, cooling, and networking.
+
+#### Zone Structure
+```
+Azure Region (e.g., East US)
+┌─────────────────────────────────────────────────────┐
+│                                                     │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐       │
+│  │  Zone 1  │   │  Zone 2  │   │  Zone 3  │       │
+│  │  (DC A)  │   │  (DC B)  │   │  (DC C)  │       │
+│  │          │   │          │   │          │       │
+│  │  VM1     │   │  VM2     │   │  VM3     │       │
+│  │  DB-Pri  │   │  DB-Sec  │   │  LB      │       │
+│  └──────────┘   └──────────┘   └──────────┘       │
+│       │              │              │              │
+│       └──────────────┼──────────────┘              │
+│            High-speed, low-latency                 │
+│            interconnect (<2ms RTT)                 │
+└─────────────────────────────────────────────────────┘
+```
+
+#### Key Characteristics
+- **3 zones** per supported region (labeled 1, 2, 3)
+- Zones are **physically isolated** (separate buildings, often miles apart)
+- Connected via high-bandwidth, low-latency fiber (<2ms round-trip)
+- Zone mapping is **unique per subscription** (Zone 1 in your subscription may be different DC than Zone 1 in another)
+
+#### Zone-Redundant Services
+| Service Type | Description | Example |
+|--------------|-------------|---------|
+| **Zonal** | Resource pinned to specific zone | VM in Zone 1 |
+| **Zone-redundant** | Automatically replicated across zones | ZRS Storage, Zone-redundant LB |
+
+#### Supported Resources
+- Virtual Machines
+- Managed Disks (ZRS)
+- Public IP addresses (Standard SKU)
+- Load Balancer (Standard SKU)
+- VPN Gateway / ExpressRoute Gateway
+- Azure SQL Database
+- Azure Kubernetes Service (AKS)
+- Storage Accounts (ZRS, GZRS)
+
+#### Deployment Considerations
+- Select zone at **VM creation time** (cannot change later)
+- Deploy **minimum 2 VMs across 2+ zones** for HA
+- Use **Standard Load Balancer** (Basic doesn't support zones)
+- **Zone-redundant storage (ZRS)** for shared data across zones
+- Managed disks are **zonal by default** (pinned to VM's zone)
+
+#### When to Use
+| Scenario | Recommendation |
+|----------|----------------|
+| Max availability within region | Availability Zones |
+| Legacy apps, can't redesign | Availability Sets |
+| Auto-scaling stateless apps | VMSS across zones |
+| Disaster recovery (region failure) | Azure Site Recovery + paired region |
+
+#### Key Points
+- Not all regions support Availability Zones
+- Inter-zone traffic incurs **bandwidth charges**
+- SLA: **99.99%** (requires 2+ VMs across 2+ zones)
+- **Use case:** Mission-critical production, databases, enterprise apps
 
 ### Availability Sets
-- Logical grouping of VMs within a data center
-- **Fault Domains (FD):** Separate physical racks (max 3)
-- **Update Domains (UD):** VMs rebooted together during maintenance (max 20)
-- Protects against hardware failures and planned maintenance
-- SLA: 99.95%
-- **Use case:** Legacy HA, workloads that don't support zones
+A logical grouping of VMs within a single data center that ensures VMs are distributed across multiple physical hardware nodes.
+
+#### Fault Domains (FD)
+- Separate physical racks with independent power and network switch
+- Protects against **hardware failures** (rack-level)
+- **Maximum: 3 FDs** per availability set
+- VMs spread across FDs won't all fail if one rack goes down
+
+#### Update Domains (UD)
+- Groups of VMs that can be rebooted together during **planned maintenance**
+- Azure updates one UD at a time, waiting 30 minutes between each
+- **Maximum: 20 UDs** per availability set (default: 5)
+- Ensures at least some VMs remain running during updates
+
+#### How It Works
+```
+Availability Set (3 FD x 5 UD)
+┌─────────────┬─────────────┬─────────────┐
+│   FD 0      │   FD 1      │   FD 2      │
+│  (Rack 1)   │  (Rack 2)   │  (Rack 3)   │
+├─────────────┼─────────────┼─────────────┤
+│ VM1 (UD0)   │ VM2 (UD1)   │ VM3 (UD2)   │
+│ VM4 (UD3)   │ VM5 (UD4)   │ VM6 (UD0)   │
+└─────────────┴─────────────┴─────────────┘
+```
+
+#### Key Points
+- VMs must be added to availability set **at creation time**
+- All VMs in set should have the **same configuration**
+- Use with **Azure Load Balancer** for traffic distribution
+- Cannot span multiple regions or data centers
+- SLA: **99.95%** (requires 2+ VMs)
+- **Use case:** Legacy HA, workloads that don't support Availability Zones
 
 ### Virtual Machine Scale Sets (VMSS)
-- Auto-scaling group of identical VMs
-- Automatically increase/decrease VM count based on demand or schedule
-- Integrated with load balancer
-- Can span Availability Zones
-- **Use case:** Stateless applications, web tiers, batch processing
+A group of identical, auto-scaling VMs managed as a single resource for high availability and elasticity.
+
+#### Key Features
+- All VMs created from the **same base image** and configuration
+- Supports up to **1,000 VMs** (or 600 with custom images)
+- Integrated with **Azure Load Balancer** or **Application Gateway**
+- Can span **Availability Zones** for zone redundancy
+- **Uniform** or **Flexible** orchestration modes
+
+#### Orchestration Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| **Uniform** | Identical VMs, optimized for large stateless workloads | Web frontends, container hosts, batch |
+| **Flexible** | Mix VM sizes/types, manual or auto-scaling | More control, gradual VMSS migration |
+
+#### Scaling Options
+
+**Autoscale (Metric-based)**
+- Scale based on CPU, memory, queue length, custom metrics
+- Define min/max instance count and scale rules
+- Example: Add 2 VMs when CPU > 75% for 5 minutes
+
+**Scheduled Scaling**
+- Scale at specific times (e.g., business hours)
+- Predictable workload patterns
+
+**Manual Scaling**
+- Set instance count directly via portal/CLI/API
+
+#### Scaling Configuration Example
+```
+VMSS Configuration:
+├── Min instances: 2
+├── Max instances: 10
+├── Default: 3
+│
+├── Scale-out rule:
+│   └── CPU > 75% for 5 min → Add 2 VMs (cooldown: 5 min)
+│
+└── Scale-in rule:
+    └── CPU < 25% for 10 min → Remove 1 VM (cooldown: 10 min)
+```
+
+#### Upgrade Policies
+- **Automatic:** VMs updated immediately when model changes
+- **Rolling:** Updates in batches with configurable batch size and pause
+- **Manual:** You control when each VM is upgraded
+
+#### Health Monitoring
+- **Application Health Extension:** Probe endpoint on each VM
+- **Automatic Repairs:** Replace unhealthy instances automatically
+- Grace period configurable for startup time
+
+#### Key Points
+- Use **custom images** or **Azure Marketplace** images
+- Supports **Spot VMs** for cost savings (can be evicted)
+- Data disks attached to all instances
+- Use **cloud-init** or **Custom Script Extension** for initialization
+- Works with **Azure DevOps** and **GitHub Actions** for CI/CD
+- SLA: **99.95%** (single zone) or **99.99%** (multi-zone)
+- **Use case:** Stateless apps, web/API tiers, batch processing, container hosts
 
 ### Comparison Table
 
@@ -271,3 +413,297 @@ Strategies to ensure VM uptime and resilience.
 ### Reserved Instances
 - 1 or 3-year commitment for up to 72% savings
 - Best for predictable, steady-state workloads
+
+---
+
+## 8. Hands-On Exercises
+
+### Exercise 1: Create a VNet with Subnets
+**Objective:** Create a virtual network with multiple subnets using Azure CLI
+
+```bash
+# Create resource group
+az group create --name rg-lab-networking --location eastus
+
+# Create VNet with address space 10.0.0.0/16
+az network vnet create \
+  --resource-group rg-lab-networking \
+  --name vnet-lab \
+  --address-prefix 10.0.0.0/16 \
+  --subnet-name subnet-web \
+  --subnet-prefix 10.0.1.0/24
+
+# Add additional subnets
+az network vnet subnet create \
+  --resource-group rg-lab-networking \
+  --vnet-name vnet-lab \
+  --name subnet-app \
+  --address-prefix 10.0.2.0/24
+
+az network vnet subnet create \
+  --resource-group rg-lab-networking \
+  --vnet-name vnet-lab \
+  --name subnet-db \
+  --address-prefix 10.0.3.0/24
+
+# Verify subnets
+az network vnet subnet list \
+  --resource-group rg-lab-networking \
+  --vnet-name vnet-lab \
+  --output table
+```
+
+---
+
+### Exercise 2: Deploy a VM with NSG Rules
+**Objective:** Create a VM and configure inbound rules for SSH/RDP access
+
+```bash
+# Create NSG
+az network nsg create \
+  --resource-group rg-lab-networking \
+  --name nsg-web
+
+# Add SSH rule (Linux) - only from your IP
+az network nsg rule create \
+  --resource-group rg-lab-networking \
+  --nsg-name nsg-web \
+  --name AllowSSH \
+  --priority 100 \
+  --source-address-prefixes "YOUR_PUBLIC_IP" \
+  --destination-port-ranges 22 \
+  --protocol Tcp \
+  --access Allow
+
+# Add HTTP rule
+az network nsg rule create \
+  --resource-group rg-lab-networking \
+  --nsg-name nsg-web \
+  --name AllowHTTP \
+  --priority 110 \
+  --source-address-prefixes "*" \
+  --destination-port-ranges 80 \
+  --protocol Tcp \
+  --access Allow
+
+# Create VM in subnet with NSG
+az vm create \
+  --resource-group rg-lab-networking \
+  --name vm-web-01 \
+  --image Ubuntu2204 \
+  --size Standard_B2s \
+  --vnet-name vnet-lab \
+  --subnet subnet-web \
+  --nsg nsg-web \
+  --admin-username azureuser \
+  --generate-ssh-keys \
+  --public-ip-sku Standard
+```
+
+---
+
+### Exercise 3: Create an Availability Set with VMs
+**Objective:** Deploy multiple VMs in an availability set for high availability
+
+```bash
+# Create availability set (3 FD, 5 UD)
+az vm availability-set create \
+  --resource-group rg-lab-networking \
+  --name avset-web \
+  --platform-fault-domain-count 3 \
+  --platform-update-domain-count 5
+
+# Create VM 1 in availability set
+az vm create \
+  --resource-group rg-lab-networking \
+  --name vm-avset-01 \
+  --availability-set avset-web \
+  --image Ubuntu2204 \
+  --size Standard_B2s \
+  --vnet-name vnet-lab \
+  --subnet subnet-web \
+  --admin-username azureuser \
+  --generate-ssh-keys \
+  --no-wait
+
+# Create VM 2 in availability set
+az vm create \
+  --resource-group rg-lab-networking \
+  --name vm-avset-02 \
+  --availability-set avset-web \
+  --image Ubuntu2204 \
+  --size Standard_B2s \
+  --vnet-name vnet-lab \
+  --subnet subnet-web \
+  --admin-username azureuser \
+  --generate-ssh-keys \
+  --no-wait
+
+# Verify availability set
+az vm availability-set show \
+  --resource-group rg-lab-networking \
+  --name avset-web \
+  --output table
+```
+
+---
+
+### Exercise 4: Deploy VMs Across Availability Zones
+**Objective:** Create VMs in different zones with a load balancer
+
+```bash
+# Create public IP for load balancer
+az network public-ip create \
+  --resource-group rg-lab-networking \
+  --name pip-lb-web \
+  --sku Standard \
+  --zone 1 2 3
+
+# Create load balancer
+az network lb create \
+  --resource-group rg-lab-networking \
+  --name lb-web \
+  --sku Standard \
+  --public-ip-address pip-lb-web \
+  --frontend-ip-name frontend-web \
+  --backend-pool-name backend-web
+
+# Create VM in Zone 1
+az vm create \
+  --resource-group rg-lab-networking \
+  --name vm-zone1 \
+  --zone 1 \
+  --image Ubuntu2204 \
+  --size Standard_B2s \
+  --vnet-name vnet-lab \
+  --subnet subnet-web \
+  --admin-username azureuser \
+  --generate-ssh-keys \
+  --no-wait
+
+# Create VM in Zone 2
+az vm create \
+  --resource-group rg-lab-networking \
+  --name vm-zone2 \
+  --zone 2 \
+  --image Ubuntu2204 \
+  --size Standard_B2s \
+  --vnet-name vnet-lab \
+  --subnet subnet-web \
+  --admin-username azureuser \
+  --generate-ssh-keys \
+  --no-wait
+
+# Create VM in Zone 3
+az vm create \
+  --resource-group rg-lab-networking \
+  --name vm-zone3 \
+  --zone 3 \
+  --image Ubuntu2204 \
+  --size Standard_B2s \
+  --vnet-name vnet-lab \
+  --subnet subnet-web \
+  --admin-username azureuser \
+  --generate-ssh-keys
+```
+
+---
+
+### Exercise 5: Create a Virtual Machine Scale Set
+**Objective:** Deploy a VMSS with autoscaling rules
+
+```bash
+# Create VMSS with 2 initial instances
+az vmss create \
+  --resource-group rg-lab-networking \
+  --name vmss-web \
+  --image Ubuntu2204 \
+  --vm-sku Standard_B2s \
+  --instance-count 2 \
+  --vnet-name vnet-lab \
+  --subnet subnet-web \
+  --admin-username azureuser \
+  --generate-ssh-keys \
+  --upgrade-policy-mode Automatic \
+  --zones 1 2 3
+
+# Add autoscale rule - scale out when CPU > 70%
+az monitor autoscale create \
+  --resource-group rg-lab-networking \
+  --resource vmss-web \
+  --resource-type Microsoft.Compute/virtualMachineScaleSets \
+  --name autoscale-vmss \
+  --min-count 2 \
+  --max-count 10 \
+  --count 2
+
+az monitor autoscale rule create \
+  --resource-group rg-lab-networking \
+  --autoscale-name autoscale-vmss \
+  --condition "Percentage CPU > 70 avg 5m" \
+  --scale out 2
+
+# Add autoscale rule - scale in when CPU < 30%
+az monitor autoscale rule create \
+  --resource-group rg-lab-networking \
+  --autoscale-name autoscale-vmss \
+  --condition "Percentage CPU < 30 avg 10m" \
+  --scale in 1
+
+# View VMSS instances
+az vmss list-instances \
+  --resource-group rg-lab-networking \
+  --name vmss-web \
+  --output table
+```
+
+---
+
+### Exercise 6: Attach Data Disks to a VM
+**Objective:** Add and configure data disks
+
+```bash
+# Create a managed data disk
+az disk create \
+  --resource-group rg-lab-networking \
+  --name disk-data-01 \
+  --size-gb 128 \
+  --sku Premium_LRS
+
+# Attach disk to existing VM
+az vm disk attach \
+  --resource-group rg-lab-networking \
+  --vm-name vm-web-01 \
+  --name disk-data-01
+
+# Or create and attach in one command
+az vm disk attach \
+  --resource-group rg-lab-networking \
+  --vm-name vm-web-01 \
+  --name disk-data-02 \
+  --size-gb 64 \
+  --sku StandardSSD_LRS \
+  --new
+
+# List disks attached to VM
+az vm show \
+  --resource-group rg-lab-networking \
+  --name vm-web-01 \
+  --query "storageProfile.dataDisks" \
+  --output table
+```
+
+---
+
+### Cleanup
+```bash
+# Delete all resources when done
+az group delete --name rg-lab-networking --yes --no-wait
+```
+
+### Portal Exercises
+1. **Create VM via Portal:** Walk through the wizard, observe all options
+2. **Resize a VM:** Stop VM → Change size → Start VM
+3. **Enable Boot Diagnostics:** VM → Settings → Boot diagnostics → Enable
+4. **View Metrics:** VM → Monitoring → Metrics → Add CPU, Network, Disk charts
+5. **Connect via Bastion:** Deploy Bastion → Connect without public IP
