@@ -1,0 +1,189 @@
+::::02/03/2026::::
+
+Point to Site VPN Connection:
+==Azure==
+1. Create a VPN with a dedicated subnet named "GatewaySubnet"
+2. Create a VPN Gateway pointing to the "GatewaySubnet"
+3. Create a root certificate. Export the public key.
+4. Configure the VPN Gateway
+    a. Upload the public key
+    b. Define an adress pool. These are the addresses that are assigned to the client machines when they connect.
+
+==Client==
+1. Create a user/client certificate from the same root certificate as above.
+2. Install the certificate
+3. Donwload and install the VPN Client software from the VPN Gateway defined above.
+4. Connect to the Azure resources using the private ips now.
+
+
+Site to Site VPN Connection:
+==Azure==
+1. Create a VPN with a dedicated subnet named "GatewaySubnet"
+2. Create a VPN Gateway pointing to the "GatewaySubnet"
+3. Create a Local Network Gateway pointing to the public IP of the router of the company network. Specify the private address space.
+4. Configure the VPN Gateway's connection poiting to the local network gateway in #3.
+
+
+==Premise==
+1. Consider that it is the software router in Windows server. 
+2. Install routing services in the Windows server (#1).
+3. Configure the routing services
+    a. Add a network interface pointing to the public IP of the VPN gateway.
+    b. To the network interface in #a, add the private ip address range of the Azure VPN
+
+
+Note: 
+    If a VPN peering is added to the VPN cotaining the VPN gateway, the VPN peering process will detect the VPN gateway and offer right options so that the Site-to-Site VPN continues to work for the peered VPN.
+    But, the routing services of the on-premise router will need to be updated with the ip address range of the newly peered VPN.
+
+
+::::03/03/2026::::
+Azure Resource Manager (ARM) - Ignore, as this is not very important
+
+Azure Backup Services for VM
+1. VM -> Backup 
+2. Create a recovery services vault (need to be in the same region as the VM)
+3. Define a back up policy mentioning the schedule of the backup and the retention period. The backups will be taken as per the schedule.
+4. Using the backups, we can do "File Recovery" and/or "Restore VM"
+
+Microsoft Azure Recovery Services (MARS) Agent
+1. This is a software that is intalled on a machine for taking regular backups. The backups are taken as per the schedule defined in the GUI of the software at the time of setup and stored in the Azure Recovery Services Vault.
+2. Azure Recovery Services Vault -> Backup -> Select "On Premises" -> Donwload the MARS agent -> Download the credential file for connecting the agent to the vault.
+
+Azure Active Directory / Entra ID
+1. Lets say, I create an Azure account using saw2881@gmail.com
+2. An Active Directory is created with the domain name of saw2881gmail.onmicrosoft.com. saw2881_gmail is added as an user with Global Admin rights. So, the complete identity of the user becomes saw2881_gmail@saw2881gmail.onmicrosoft.com.
+3. saw2881_gmail creates another tenant named "foo". This will create another instance of Azure AD with the domain name of foo.onmicrosoft.com and once again saw2881_gmail is added as an user with Global Admin rights.
+
+::::05/03/2026::::
+Multi Factor Authentcation
+1. Go to Azure AD -> Security -> MFA -> Enable for the users in the AD
+
+Conditional Access Policies - Ignore, as this is not very important
+Access Reviews - Ignore, as this is not very important
+
+Azure AD Connect
+1. Connects an on-premise AD to Azure AD. The on-premise server needs to install Azure AD Connect component, which syncs the users and their credentials to Azure AD.
+2. There are two main authentication methods:
+    a. Pass-through Authentication - User authentication happens against the on-premise AD in real-time.
+    b. Password hash synchronization - User authentication happens against Azure AD, which stores the hash of the hash of the password.
+   Additional features:
+    c. Password writeback - When the user changes the password in Azure AD, the new password is written back to the on-premise AD. (Works with either method above)
+
+::::06/03/2026::::
+==Azure Migrate Service==
+Central hub for discovering, assessing, and migrating on-premises workloads to Azure.
+
+What it can migrate:
+    1. Servers (VMware, Hyper-V, physical) - Azure Migrate: Server Migration
+    2. Databases (SQL Server) -	Azure Database Migration Service
+    3. Web apps	- Azure Migrate: Web App Migration Assistant
+    4. Virtual desktops	- Azure Migrate: VDI Migration
+    5. Large data volumes - Azure Data Box
+
+Migration Process:
+Phase 1: Discover
+    Create an Azure Migrate project in Azure portal
+    Deploy Azure Migrate appliance (lightweight VM) on-premises
+    Appliance discovers servers, apps, dependencies
+    Data sent to Azure Migrate (no agent needed for discovery)
+
+Phase 2: Assess
+    Azure Migrate analyzes discovered workloads
+    Generates readiness reports:
+        Azure readiness (compatible/not compatible)
+        Recommended VM size & SKU
+        Monthly cost estimates
+        Dependency mapping (which servers talk to each other)
+
+Phase 3: Migrate
+    Replication: Enable replication of VMs to Azure (uses ASR under the hood)
+    Test Migration: Validate in isolated environment
+    Cutover Migration: Final migration with minimal downtime
+    Decommission: Turn off on-premises servers
+
+==Azure Site Recovery (ASR)==
+Disaster recovery as a service (DRaaS) - replicates workloads to a secondary region and enables failover during outages.
+
+What it can protect:
+    Azure VMs (region to region)
+    On-premises VMs (VMware, Hyper-V, physical servers) → Azure
+    On-premises → Secondary datacenter
+    
+Setup Process for Azure VM DR (Region to Region)::
+    Create a Recovery Services Vault in the target/secondary region
+    Go to the source VM → Disaster Recovery → Select target region
+    ASR automatically:
+        Creates target resource group, VNet, storage account, cache storage
+        Installs Mobility Service agent on the VM
+        Enable replication
+    
+How replication works:
+    Mobility Service captures disk writes
+    Data sent to cache storage account in source region
+    Data replicated to target storage in DR region
+    Recovery points created (crash-consistent every 5 min, app-consistent per policy)
+
+Failover:
+    Test Failover – Creates VM in target region in isolated network (validates DR without impact)
+    Planned Failover – Graceful failover with no data loss
+    Failover – During actual disaster; may have minimal data loss
+    Failback – Return to original region after disaster is resolved
+
+::::09/03/2026::::
+==Azure Load Balancer ==
+SKUs: Basic (free, limited features, no SLA) vs Standard (paid, zone-redundant, SLA-backed, more backend pool options)
+Setup
+    1. Create VMs within an availability set or create a VM scale set
+    2. Create a load balancer with a public IP (frontend IP configuration)
+    3. Create a backend pool pointing to the availability set / scale set
+    4. Configure a health probe (e.g., TCP/HTTP probe on a specific port)
+    5. Create a load balancing rule (e.g., frontend port 80 → backend port 80)
+
+
+==Azure Application Gateway==
+Layer 7 (HTTP/HTTPS) load balancer for web applications. Unlike Load Balancer (Layer 4), it understands HTTP.
+Key Features:
+    - URL-based routing (e.g., /images/* → image servers, /api/* → API servers)
+    - SSL termination – offload SSL decryption from backend servers
+    - Web Application Firewall (WAF) – protection against SQL injection, XSS
+    - Cookie-based session affinity
+    - Multi-site hosting on a single gateway
+SKUs: Standard_v2 (autoscaling, zone-redundant) vs WAF_v2 (includes WAF)
+Setup:
+    1. Create a VNet with a dedicated subnet for the Application Gateway
+    2. Create the Application Gateway (select SKU, configure autoscaling)
+    3. Configure frontend IP (public or private)
+    4. Create backend pool(s) pointing to VMs, VM scale sets, or App Services
+    5. Configure HTTP settings (port, protocol, cookie affinity, connection draining)
+    6. Create listener(s) (port, protocol, SSL certificate if HTTPS)
+    7. Create routing rule(s) linking listener → backend pool (basic or path-based)
+
+Use App Gateway for: Web applications needing URL routing, WAF, or SSL termination
+Use Load Balancer for: Non-HTTP traffic or simple port-based distribution
+
+==Azure Traffic Manager==
+DNS-based global load balancer that distributes traffic across multiple regions.
+Works at DNS level - returns the best endpoint's IP, user connects directly (no proxy).
+
+Routing Methods:
+    - Priority: Primary → Failover (disaster recovery)
+    - Weighted: % split e.g., 70/30 (A/B testing, gradual migration)
+    - Performance: Lowest latency endpoint (global apps)
+    - Geographic: By user's location (data residency)
+    - MultiValue: Returns multiple IPs (client-side load balancing)
+    - Subnet: By user's IP range (enterprise rules)
+
+Common Architecture (multi-region):
+    User → Traffic Manager → Regional Load Balancer → VMs
+    - Traffic Manager picks the best region
+    - Regional LB distributes within that region
+
+Setup:
+    1. Create Load Balancers (or App Gateways) in each region with public IPs
+    2. Create Traffic Manager profile, choose routing method
+    3. Add each regional LB's public IP as an endpoint
+    4. Configure health probes for endpoints
+    5. Point your domain to myapp.trafficmanager.net (CNAME record in DNS)
+       Example: In your DNS provider (let's say godaddy.com), add: CNAME | www | myapp.trafficmanager.net
+       Result: User -> www.mycompany.com → myapp.trafficmanager.net → best region's IP
